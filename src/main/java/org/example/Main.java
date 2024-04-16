@@ -1,27 +1,36 @@
 package org.example;
 
+import com.google.common.util.concurrent.FutureCallback;
+import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.MoreExecutors;
 import com.google.common.util.concurrent.Service;
+import org.bitcoinj.base.Address;
+import org.bitcoinj.base.Coin;
+import org.bitcoinj.base.ScriptType;
+import org.bitcoinj.core.Context;
 import org.bitcoinj.core.NetworkParameters;
-import org.bitcoinj.core.Peer;
-import org.bitcoinj.core.PeerAddress;
-import org.bitcoinj.core.listeners.PeerConnectedEventListener;
+import org.bitcoinj.core.Transaction;
+import org.bitcoinj.core.TransactionConfidence;
 import org.bitcoinj.crypto.ECKey;
 import org.bitcoinj.kits.WalletAppKit;
 import org.bitcoinj.params.MainNetParams;
 import org.bitcoinj.params.RegTestParams;
 import org.bitcoinj.params.TestNet3Params;
 import org.bitcoinj.utils.BriefLogFormatter;
+import org.bitcoinj.wallet.DeterministicKeyChain;
+import org.bitcoinj.wallet.DeterministicSeed;
+import org.bitcoinj.wallet.Wallet;
+import org.bitcoinj.wallet.listeners.WalletCoinsReceivedEventListener;
 
 import java.io.File;
-import java.net.InetSocketAddress;
-import java.net.UnknownHostException;
+import java.io.IOException;
+import java.util.concurrent.Executor;
 
 // Press Shift twice to open the Search Everywhere dialog and type `show whitespaces`,
 // then press Enter. You can now see whitespace characters in your code.
 public class Main {
     //String[] args = null;
-    private NetworkParameters connectToBitcoinNode(String[] args){
+    private NetworkParameters connectToBitcoinNode(String[] args) {
         if (args.length < 2) {
             System.err.println("Usage: address-to-send-back-to [regtest|testnet]");
             //return;
@@ -40,34 +49,100 @@ public class Main {
         }
         return params;
     }
-    public static void main(String[] args) throws UnknownHostException {
 
-        BriefLogFormatter.init();
+    private Address getSegAddress(Wallet wallet) {
+        // Get the DeterministicSeed from the wallet
+        DeterministicSeed seed = wallet.getKeyChainSeed();
 
-        NetworkParameters params = null; // use TestNet3Params.get() for testnet
-        Main app = new Main();
-        params = app.connectToBitcoinNode(new String[]{"2oiosidmos09494", "regtest"});
-        System.out.println(params);
+        // Create a new DeterministicKeyChain with the P2WPKH script type
+        DeterministicKeyChain keyChain = DeterministicKeyChain.builder().seed(seed).outputScriptType(ScriptType.P2WPKH).build();
 
-        WalletAppKit kit = new WalletAppKit(params, new File("C:\\Users\\itoro\\Downloads\\bitcoinj"), "Wallet-A") {
+        // Add the key chain to the wallet
+        wallet.addAndActivateHDChain(keyChain);
+
+        // Generate a fresh SegWit address
+        Address segwitAddress = wallet.freshReceiveAddress();
+
+// Print the SegWit address
+        System.out.println("Segwit address: " + segwitAddress.toString());
+        return segwitAddress;
+    }
+
+    private void connectToPeer() {
+        //            if (params == RegTestParams.get()) {
+//                //kit.connectToLocalHost();
+//                int port = 18444;
+//                String ipAddress = "192.168.100.130";
+//                //String ipAddress = "127.0.0.1";
+//                try {
+//                    InetAddress address = InetAddress.getByName(ipAddress);
+//                    if (address.isReachable(5000)) {
+//                        InetSocketAddress nodeAddress = new InetSocketAddress(ipAddress, port);
+//                        PeerAddress peerAddress = PeerAddress.simple(nodeAddress);
+//                        kit.setPeerNodes(peerAddress);
+//                        System.out.println("Connected to peer");
+//                    } else {
+//                        System.out.println("IP address is not reachable");
+//                    }
+//                } catch (UnknownHostException e) {
+//                    System.out.println("Invalid IP address");
+//                } catch (IOException e) {
+//                    System.out.println("Error checking IP address");
+//                }
+//            }
+
+//       kit.wallet().addChangeEventListener(new WalletChangeEventListener() {
+//           @Override
+//           public void onWalletChanged(Wallet wallet) {
+//               System.out.println("changed");
+//           }
+//       });
+    }
+
+    private void listenForPayment(WalletAppKit kit){
+        //Address recieveAddress = kit.wallet().freshReceiveAddress();
+        //System.out.println("Send BTC to: " + recieveAddress);
+        Executor executor = MoreExecutors.directExecutor();
+        Address myaddress = kit.wallet().currentReceiveAddress();
+        System.out.println(myaddress);
+        // Get the balance
+        Coin balance = kit.wallet().getBalance();
+
+        // Print the balance
+        System.out.println("Wallet balance: " + balance.toFriendlyString());
+
+        //Address mySegAddress = app.getSegAddress(kit.wallet());
+        //System.out.println(mySegAddress);
+
+
+        //boolean stayRunning = true;
+        kit.wallet().addCoinsReceivedEventListener(new WalletCoinsReceivedEventListener() {
             @Override
-            protected void onSetupCompleted() {
-                if (wallet().getKeyChainGroupSize() < 1)
-                    wallet().importKey(new ECKey());
+            public void onCoinsReceived(Wallet w, Transaction tx, Coin prevBalance, Coin newBalance) {
+                Coin value = tx.getValueSentToMe(w);
+                System.out.println("Received tx for " + value.toFriendlyString() + ": " + tx);
+                System.out.println("Transaction will be forwarded after it confirms.");
+                Futures.addCallback(tx.getConfidence().getDepthFuture(1), new FutureCallback<TransactionConfidence>() {
+                    @Override
+                    public void onSuccess(TransactionConfidence result) {
+                        // "result" here is the same as "tx" above, but we use it anyway for clarity.
+                        //forwardCoins(result);
+                        System.out.println("Transaction confirmed: " + result.getTransactionHash());
+                    }
+
+                    @Override
+                    public void onFailure(Throwable t) {
+                    }
+                }, executor);
             }
-        };
+        });
+    }
 
-        System.out.println(params.getPort());
-        System.out.println(params.getAddrSeeds());
+    private void sendPayment(WalletAppKit kit){
 
-        if (params == RegTestParams.get()) {
-            //kit.connectToLocalHost();
-            int port = 18424;
-            String ipAddress = "172.30.145.30";
-            InetSocketAddress nodeAddress = new InetSocketAddress(ipAddress, port);
-            kit.setPeerNodes(PeerAddress.simple(nodeAddress));
-        }
+    }
 
+    private void attachStatusListners(WalletAppKit kit){
         kit.addListener(new Service.Listener() {
             @Override
             public void starting() {
@@ -77,14 +152,6 @@ public class Main {
             @Override
             public void running() {
                 System.out.println("Running!");
-
-                // Now that WalletAppKit is running, it's safe to add the PeerConnectedEventListener.
-                kit.peerGroup().addConnectedEventListener(new PeerConnectedEventListener() {
-                    @Override
-                    public void onPeerConnected(Peer peer, int peerCount) {
-                        System.out.println("Connected to: " + peer.getAddress() + ", peer count: " + peerCount);
-                    }
-                });
             }
 
             @Override
@@ -92,17 +159,51 @@ public class Main {
                 System.err.println("Failed to start WalletAppKit: " + failure);
             }
         }, MoreExecutors.directExecutor());
+    }
+    public static void main(String[] args) throws IOException {
 
-        kit.startAsync();
-        kit.awaitRunning();
+        BriefLogFormatter.init();
+        try {
+            NetworkParameters params = null; // use TestNet3Params.get() for testnet
+            Main app = new Main();
+            params = app.connectToBitcoinNode(new String[]{"bcrt1qg4u6746cf0geu3ysrdn2dmpn5vtm3ye2dmsmhw", "testnet"});
+            System.out.println(params);
+            Context context = new Context(params);
 
-        kit.peerGroup().addConnectedEventListener(new PeerConnectedEventListener() {
-            @Override
-            public void onPeerConnected(Peer peer, int peerCount) {
-                System.out.println("Connected to: " + peer.getAddress() + ", peer count: " + peerCount);
+            // Propagate the Context object to the current thread
+            Context.propagate(context);
+            WalletAppKit kit = new WalletAppKit(params, new File("C:\\Users\\itoro\\Downloads\\bitcoinj"), "Wallet-A") {
+                @Override
+                protected void onSetupCompleted() {
+                    if (wallet().getKeyChainGroupSize() < 1)
+                        wallet().importKey(new ECKey());
+                }
+            };
+
+            System.out.println(params.getPort());
+            System.out.println(params.getAddrSeeds());
+
+            kit.startAsync();
+            kit.awaitRunning();
+
+            app.attachStatusListners(kit);
+            app.listenForPayment(kit);
+
+            while (true) {
+                try {
+                    Thread.sleep(Long.MAX_VALUE);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
             }
-        });
-        System.out.println(params.getAddrSeeds());
+            // kit.stopAsync();
+            //kit.awaitTerminated();
+            //kit.peerGroup().startBlockChainDownload(bListener);
+
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+
 
     }
 }
