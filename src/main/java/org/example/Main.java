@@ -7,10 +7,7 @@ import com.google.common.util.concurrent.Service;
 import org.bitcoinj.base.Address;
 import org.bitcoinj.base.Coin;
 import org.bitcoinj.base.ScriptType;
-import org.bitcoinj.core.Context;
-import org.bitcoinj.core.NetworkParameters;
-import org.bitcoinj.core.Transaction;
-import org.bitcoinj.core.TransactionConfidence;
+import org.bitcoinj.core.*;
 import org.bitcoinj.crypto.ECKey;
 import org.bitcoinj.kits.WalletAppKit;
 import org.bitcoinj.params.MainNetParams;
@@ -19,11 +16,14 @@ import org.bitcoinj.params.TestNet3Params;
 import org.bitcoinj.utils.BriefLogFormatter;
 import org.bitcoinj.wallet.DeterministicKeyChain;
 import org.bitcoinj.wallet.DeterministicSeed;
+import org.bitcoinj.wallet.SendRequest;
 import org.bitcoinj.wallet.Wallet;
 import org.bitcoinj.wallet.listeners.WalletCoinsReceivedEventListener;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.List;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 
 // Press Shift twice to open the Search Everywhere dialog and type `show whitespaces`,
@@ -99,7 +99,7 @@ public class Main {
 //       });
     }
 
-    private void listenForPayment(WalletAppKit kit){
+    private void listenForPayment(WalletAppKit kit) {
         //Address recieveAddress = kit.wallet().freshReceiveAddress();
         //System.out.println("Send BTC to: " + recieveAddress);
         Executor executor = MoreExecutors.directExecutor();
@@ -138,11 +138,65 @@ public class Main {
         });
     }
 
-    private void sendPayment(WalletAppKit kit){
+    private void sendPayment(WalletAppKit kit, String amount) {
+        Coin value = Coin.parseCoin(amount);
+        final Coin amountToSend = value.subtract(Transaction.REFERENCE_DEFAULT_MIN_TX_FEE);
+        //CompletableFuture<Coin> balanceFuture = kit.wallet().getBalanceFuture(amountToSend, Wallet.BalanceType.AVAILABLE);
 
+
+        Address to = kit.wallet().parseAddress("tb1qerzrlxcfu24davlur5sqmgzzgsal6wusda40er");
+        try {
+            //Wallet.SendResult result = kit.wallet().sendCoins(kit.peerGroup(), to, value);
+            //System.out.println("coins sent. transaction hash: " + result.transaction().getTxId());
+
+            // Create a SendRequest
+            SendRequest req = SendRequest.to(to, value);
+
+            // Set the fee per kilobyte (replace 'customFee' with the fee you want to set)
+            req.feePerKb = Coin.valueOf(100);
+
+            // Ensure the transaction will meet the required fee
+            //kit.wallet().completeTx(req);
+
+            // Broadcast the transaction to the network
+            Wallet.SendResult result = kit.wallet().sendCoins(kit.peerGroup(),req);
+            System.out.println("coins sent. transaction hash: " + result.transaction().getTxId());
+            CompletableFuture<TransactionConfidence> confirmationFuture = result.transaction().getConfidence().getDepthFuture(1);
+
+            confirmationFuture.thenAccept(confidence -> {
+                System.out.println("Transaction Confidence: " + confidence.getConfidenceType());
+            }).exceptionally(e -> {
+                e.printStackTrace();
+                return null;
+            });
+
+
+            //Wallet.SendResult result = kit.wallet().sendCoins(kit.peerGroup(), to, value);
+            CompletableFuture<Transaction> future = CompletableFuture.supplyAsync(() -> {
+                try {
+                    // This will block until the transaction is broadcasted
+                    return result.broadcastComplete.get();
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
+                }
+            });
+
+            future.thenAccept(transaction -> {
+                System.out.println("Sent coins onwards! Transaction hash is " + transaction.getTxId().toString());
+            }).exceptionally(e -> {
+                e.printStackTrace();
+                return null;
+            });
+        } catch (InsufficientMoneyException e) {
+            System.out.println("Not enough coins in your wallet. Missing " + e.missing.getValue() + " satoshis are missing (including fees)");
+            System.out.println("Send money to: " + kit.wallet().currentReceiveAddress().toString());
+            System.out.println("Your balance is: " + kit.wallet().getBalance());
+        }catch (Exception e){
+            System.out.println("Error " + e.getMessage());
+        }
     }
 
-    private void attachStatusListners(WalletAppKit kit){
+    private void attachStatusListners(WalletAppKit kit) {
         kit.addListener(new Service.Listener() {
             @Override
             public void starting() {
@@ -160,6 +214,21 @@ public class Main {
             }
         }, MoreExecutors.directExecutor());
     }
+
+    private void getTransactions(WalletAppKit kit){
+        // Get the transactions from the wallet
+        List<Transaction> transactions = kit.wallet().getTransactionsByTime();
+
+        for (Transaction tx : transactions) {
+            // Check if the transaction is sent from the wallet
+            if (tx.getValue(kit.wallet()).signum() < 0) {
+                System.out.println("Sent transaction: " + tx.getTxId());
+                System.out.println("Sent to: " + tx.getOutput(0).getSpentBy());
+                System.out.println("Amount: " + tx.getValue(kit.wallet()));
+            }
+        }
+    }
+
     public static void main(String[] args) throws IOException {
 
         BriefLogFormatter.init();
@@ -188,6 +257,8 @@ public class Main {
 
             app.attachStatusListners(kit);
             app.listenForPayment(kit);
+            //app.sendPayment(kit, "0.000005");
+            app.getTransactions(kit);
 
             while (true) {
                 try {
