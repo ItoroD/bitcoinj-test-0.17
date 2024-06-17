@@ -138,13 +138,13 @@ public class Main {
         });
     }
 
-    private void sendPayment(WalletAppKit kit, String amount) {
+    private void sendPayment(WalletAppKit kit, String amount, String address) {
         Coin value = Coin.parseCoin(amount);
         final Coin amountToSend = value.subtract(Transaction.REFERENCE_DEFAULT_MIN_TX_FEE);
         //CompletableFuture<Coin> balanceFuture = kit.wallet().getBalanceFuture(amountToSend, Wallet.BalanceType.AVAILABLE);
 
 
-        Address to = kit.wallet().parseAddress("tb1qjvpe2v6ussr268chvt3ry64urwzpd3lcrj6xyt");
+        Address to = kit.wallet().parseAddress(address);
         try {
             //Wallet.SendResult result = kit.wallet().sendCoins(kit.peerGroup(), to, value);
             //System.out.println("coins sent. transaction hash: " + result.transaction().getTxId());
@@ -243,13 +243,15 @@ public class Main {
         try {
             NetworkParameters params = null; // use TestNet3Params.get() for testnet
             Main app = new Main();
-            params = app.connectToBitcoinNode(new String[]{"tb1qzxlgz9yq69suz8t4cpya5ct9g6ps04u5px5rem", "testnet"});
+            //tb1qte40gstyx6d6gyde009ua6fl05ctx832tpnhj9
+            //tb1qzxlgz9yq69suz8t4cpya5ct9g6ps04u5px5rem
+            params = app.connectToBitcoinNode(new String[]{"tb1qte40gstyx6d6gyde009ua6fl05ctx832tpnhj9", "testnet"});
             System.out.println(params);
             Context context = new Context(params);
 
             // Propagate the Context object to the current thread
             Context.propagate(context);
-            WalletAppKit kit = new WalletAppKit(params, new File("C:\\Users\\itoro\\Downloads\\bitcoinj\\wallet2"), "forwarding-service-testnet") {
+            WalletAppKit kit = new WalletAppKit(params, new File("C:\\Users\\itoro\\Downloads\\bitcoinj"), "Wallet-A") {
                 @Override
                 protected void onSetupCompleted() {
                     if (wallet().getKeyChainGroupSize() < 1)
@@ -265,7 +267,7 @@ public class Main {
 
             //app.attachStatusListners(kit);
             //app.listenForPayment(kit);
-            app.sendPayment(kit, "0.0002");
+            //app.sendPayment(kit, "0.00001","tb1qte40gstyx6d6gyde009ua6fl05ctx832tpnhj9");
             app.getBalance(kit);
             //app.getTransactions(kit);
 
